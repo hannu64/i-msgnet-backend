@@ -1,9 +1,8 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
-const app = express();
-const port = process.env.PORT || 3001;
 
+const app = express();
 app.use(cors());
 app.use(express.json());
 
@@ -12,57 +11,67 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Create table with timestamp
+// Create table if not exists (already done, but safe)
 pool.query(`
   CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     chat_id TEXT NOT NULL,
     encrypted TEXT NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )
-`).catch(err => console.error('Table create error:', err));
+    sender TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    lifespan_hours INTEGER
+  );
+`, (err) => {
+  if (err) console.error('Table creation error:', err);
+});
 
-// GET: delete old messages (>24h) and return remaining
+// POST /api/messages - send a message
+app.post('/api/messages', async (req, res) => {
+  const { chatId, encrypted, lifespanHours } = req.body;
+
+  if (!chatId || !encrypted) {
+    return res.status(400).json({ error: 'Missing chatId or encrypted' });
+  }
+
+  try {
+    await pool.query(
+      'INSERT INTO messages (chat_id, encrypted, lifespan_hours) VALUES ($1, $2, $3)',
+      [chatId, encrypted, lifespanHours] // lifespanHours can be null
+    );
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error('POST error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/messages/:chatId - get messages (delete expired first)
 app.get('/api/messages/:chatId', async (req, res) => {
   const { chatId } = req.params;
+
   try {
-    // Delete messages older than 24 hours
-    await pool.query(
-      `DELETE FROM messages 
-       WHERE chat_id = $1 
-       AND timestamp < NOW() - INTERVAL '24 hours'`,
-      [chatId]
-    );
+    // Delete expired messages
+    await pool.query(`
+      DELETE FROM messages 
+      WHERE chat_id = $1 
+      AND lifespan_hours IS NOT NULL 
+      AND created_at + (lifespan_hours || ' hours')::interval < NOW()
+    `, [chatId]);
 
     // Return remaining messages
     const result = await pool.query(
-      'SELECT encrypted, timestamp FROM messages WHERE chat_id = $1 ORDER BY timestamp ASC',
+      'SELECT encrypted, sender, timestamp FROM messages WHERE chat_id = $1 ORDER BY timestamp ASC',
       [chatId]
     );
+
     res.json(result.rows);
   } catch (err) {
     console.error('GET error:', err);
-    res.status(500).json({ error: 'Database error' });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// POST: add new message
-app.post('/api/messages', async (req, res) => {
-  const { chatId, encrypted } = req.body;
-  if (!chatId || !encrypted) return res.status(400).json({ error: 'Missing fields' });
-
-  try {
-    await pool.query(
-      'INSERT INTO messages (chat_id, encrypted) VALUES ($1, $2)',
-      [chatId, encrypted]
-    );
-    res.json({ success: true });
-  } catch (err) {
-    console.error('POST error:', err);
-    res.status(500).json({ error: 'Database error' });
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Backend running on port ${port}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
