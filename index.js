@@ -75,3 +75,22 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// DELETE /api/messages/:chatId/:encrypted - delete specific message
+app.delete('/api/messages/:chatId/:encrypted', async (req, res) => {
+  const { chatId, encrypted } = req.params;
+
+  try {
+    const result = await pool.query(
+      'DELETE FROM messages WHERE chat_id = $1 AND encrypted = $2',
+      [chatId, encrypted]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('DELETE error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
