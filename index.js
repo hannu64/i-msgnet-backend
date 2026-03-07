@@ -56,7 +56,7 @@ app.get('/api/messages/:chatId', async (req, res) => {
       DELETE FROM messages 
       WHERE chat_id = $1 
       AND lifespan_hours IS NOT NULL 
-      AND created_at + (lifespan_hours || ' hours')::interval < NOW()
+      AND created_at + (lifespan_hours * INTERVAL '1 hour') < NOW()
       RETURNING encrypted
     `, [chatId]);
 
