@@ -45,31 +45,36 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
+
+
 // GET /api/messages/:chatId - get messages (delete expired first)
 app.get('/api/messages/:chatId', async (req, res) => {
   const { chatId } = req.params;
-
   try {
     // Delete expired messages
-    await pool.query(`
+    const deleteResult = await pool.query(`
       DELETE FROM messages 
       WHERE chat_id = $1 
       AND lifespan_hours IS NOT NULL 
       AND created_at + (lifespan_hours || ' hours')::interval < NOW()
+      RETURNING encrypted
     `, [chatId]);
 
-    // Return remaining messages
+    console.log(`Deleted ${deleteResult.rowCount} expired messages for chatId: ${chatId}`, deleteResult.rows);
+
+    // Return remaining
     const result = await pool.query(
       'SELECT encrypted, sender, timestamp FROM messages WHERE chat_id = $1 ORDER BY timestamp ASC',
       [chatId]
     );
-
     res.json(result.rows);
   } catch (err) {
     console.error('GET error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
